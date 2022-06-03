@@ -5,6 +5,8 @@ import json
 import os.path
 import math
 
+#POUR PASSER DU MNT AU MNS -> changer url ligne 520
+
 
 CONTAINER_ORIGIN =1026473
 
@@ -437,14 +439,14 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         self.nb_pts_h = int(self.height/self.taille_maille)+1
 
         #si on dépasse le nombre de pixels total autorisé -> on corrige
-        if (self.nb_pts_w * self.nb_pts_h) > self.NB_POLY_MAX_SUM:            
+        if (self.nb_pts_w * self.nb_pts_h) > self.NB_POLY_MAX_SUM:
             self.nb_polys = self.NB_POLY_MAX_SUM
             rapport = self.width/self.height
             pts_larg = (self.nb_polys*rapport)**0.5
             self.taille_maille = self.width/(pts_larg-1)
             self.nb_pts_w = int(self.width/self.taille_maille)+1
             self.nb_pts_h = int(self.height/self.taille_maille)+1
-            
+
 
         self.SetFloat(self.ID_TAILLE_MAILLE, self.taille_maille,format = c4d.FORMAT_METER)
 
@@ -487,7 +489,7 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         self.SetFloat(self.ID_YMIN, bbox.min.z,format = c4d.FORMAT_METER)
         self.SetFloat(self.ID_YMAX, bbox.max.z,format = c4d.FORMAT_METER)
         self.verif_coordonnees()
-    
+
     def copier_coordonnees(self):
         ymax = self.GetFloat(self.ID_YMAX)
         ymin = self.GetFloat(self.ID_YMIN)
@@ -512,12 +514,12 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         sr = '2056'
         xmin,ymin,xmyx,ymax = self.getBbox()
         width,height  = self.getDefinition()
-        
+
         #url = 'https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/Terrain/ImageServer/exportImage?f=image&bbox={bbox}&format=tiff&bboxSR={bboxSR}&imageSR={imageSR}&size={size}&pixelType=F32&adjustAspectRatio=true'.format(bbox=bbox,bboxSR=sr,imageSR=sr,size=size)
-        url = f"""https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/Terrain/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
+        #url = f"""https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/Terrain/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
         url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
-        url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_SURFACE_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
-        
+        #url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_SURFACE_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
+
         return url
 
 
@@ -555,7 +557,7 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
 
         if id == self.ID_BTON_EMPRISE_OBJET:
             self.emprise_objet()
-        
+
         if id == self.ID_BTON_COPIER_COORDONNEES:
             self.copier_coordonnees()
 

@@ -96,7 +96,12 @@ def main() -> None:
             url = f'https://ge.ch/sitg/geodata/SITG/TELECHARGEMENT/PHOTOMESH_3D_2019/{x}_{y}.zip'
             name = url.split('/')[-1]
             fn_dst = os.path.join(pth,name)
-            data = urllib.request.urlopen(url)
+            try :
+                data = urllib.request.urlopen(url)
+            except:
+                print(f'problème avec {url}')
+                continue
+
             with open(fn_dst,'wb') as saveFile:
                 saveFile.write(data.read())
 
