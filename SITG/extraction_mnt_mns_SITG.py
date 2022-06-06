@@ -7,6 +7,17 @@ import math
 
 #POUR PASSER DU MNT AU MNS -> changer url ligne 520
 
+#si on veut le mns mettre à true si on veut le MNT ->false
+MNS = False
+
+#ANNEE de la DONNEEE -> voir dasn les données json
+# https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer?f=pjson
+#"timeExtent": [
+#   946684800000,
+#   1546300800000
+#  ],
+# 1546300800000 coorespond à 2019 en UTC timestamp *1000
+ANNEE = 1546300800000
 
 CONTAINER_ORIGIN =1026473
 
@@ -515,10 +526,11 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         xmin,ymin,xmyx,ymax = self.getBbox()
         width,height  = self.getDefinition()
 
-        #url = 'https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/Terrain/ImageServer/exportImage?f=image&bbox={bbox}&format=tiff&bboxSR={bboxSR}&imageSR={imageSR}&size={size}&pixelType=F32&adjustAspectRatio=true'.format(bbox=bbox,bboxSR=sr,imageSR=sr,size=size)
-        #url = f"""https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/Terrain/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
-        url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
-        #url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_SURFACE_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true"""
+        if MNS:
+            url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_SURFACE_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true&time={ANNEE}"""
+        else:
+            url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true&time={ANNEE}"""
+
 
         return url
 
