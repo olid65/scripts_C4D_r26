@@ -66,8 +66,8 @@ def main() -> None:
     nb_pts = op.GetPointCount()
     nb_pt_z = int(nb_pts/nb_pt_x)
 
-    div_x = 7
-    div_z = 3
+    div_x = 2
+    div_z = 4
 
 
     lst_tuiles = tuilageMnt(op.GetAllPoints(),div_x,div_z,nb_pt_x,nb_pt_z)
