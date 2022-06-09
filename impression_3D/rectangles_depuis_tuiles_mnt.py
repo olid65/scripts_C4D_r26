@@ -4,14 +4,16 @@ import c4d
 doc: c4d.documents.BaseDocument  # The active document
 op: Optional[c4d.BaseObject]  # The active object, None if unselected
 
+
+
 def main() -> None:
     # Called when the plugin is selected by the user. Similar to CommandData.Execute.
     doc.StartUndo()
     for o in doc.GetActiveObjects(0):
-        
+
         centre = o.GetMp()*o.GetMg()
         rad = o.GetRad()
-        
+
         rect = c4d.BaseObject(c4d.Osplinerectangle)
         rect.SetName(o.GetName())
         rect.SetAbsPos(centre)
@@ -20,10 +22,10 @@ def main() -> None:
         rect[c4d.PRIM_RECTANGLE_HEIGHT] = rad.z*2
         doc.InsertObject(rect)
         doc.AddUndo(c4d.UNDOTYPE_NEWOBJ,rect)
-    doc.EndUndo()    
+    doc.EndUndo()
     c4d.EventAdd()
-        
-        
+
+
 """
 def state():
     # Defines the state of the command in a menu. Similar to CommandData.GetState.
