@@ -1,28 +1,32 @@
 from typing import Optional
 import c4d
-import time
-from datetime import datetime, date, time, timezone
+from datetime import datetime, timezone
 
 doc: c4d.documents.BaseDocument  # The active document
 op: Optional[c4d.BaseObject]  # The active object, None if unselected
 
 
 
-
-def main() -> None:
-    
+def year2utc(year):
     #time=1199145600000 (1 Jan 2008 00:00:00 GMT) 
     # date in string format
-    an = "2019"
-    
+   
     # convert to datetime instance
-    date_time = datetime.strptime(an, '%Y')
+    date_time = datetime.strptime(year, '%Y')
     
     # get UTC timestamp
     utc_timestamp = date_time.replace(tzinfo=timezone.utc).timestamp()
     
     # timestamp in milliseconds
-    ts = utc_timestamp*1000
+    return utc_timestamp*1000
+
+
+
+
+
+def main() -> None:
+    an = "2019"
+    ts = year2utc(an)
     print(ts)
         
     

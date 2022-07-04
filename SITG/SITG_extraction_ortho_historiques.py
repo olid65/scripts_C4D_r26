@@ -1,26 +1,14 @@
-import c4d,sys
+import c4d
 import webbrowser
-import struct
-import json
 import os.path
 import math
-
-
-#si on veut le mns mettre à true si on veut le MNT ->false
-MNS = False
-
-#ANNEE de la DONNEEE -> voir dasn les données json
-# https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer?f=pjson
-#"timeExtent": [
-#   946684800000,
-#   1546300800000
-#  ],
-# 1546300800000 coorespond à 2019 en UTC timestamp *1000
-ANNEE = 1546300800000
+import urllib.request
+import csv
+from datetime import datetime, timezone
 
 CONTAINER_ORIGIN =1026473
-
-NB_PIXEL_MAX = 4096
+NOM_CSV = 'SITG_orthophotos_historiques.csv'
+NB_PIXEL_MAX = 4096*2
 
 #CONTAINER_ORIGIN =1026473
 ORIGIN_DEFAULT = c4d.Vector(2500370.00,0.0,1117990.0) # île Rousseau
@@ -31,165 +19,142 @@ ORIGIN_DEFAULT = c4d.Vector(2500370.00,0.0,1117990.0) # île Rousseau
 #def state():
 #    return True
 
-def getCalageFromGeoTif(fn):
-    """retourne la valeur du pixel en x et y et la position du coin en haut à gauche en x et y
-       attention c'est bien le coin du ratser et pas le centre du pixel
-       Ne fonctionne pas avec les rasters tournés, fonctionne bien avec les MNT de l'API REST d'ESRI
-       Ne fonctionne pas avec les tuiles du MNT de swisstopo"""
 
-    #voir page 16 pdf description tiff
-    #et sur https://docs.python.org/3/library/struct.html pour les codes lettres de struct
-    #le nombre en clé représente le type selon description du tif
-    # le tuple en valeur représente le nombre d'octets (bytes) et le code utilissé pour unpacker
-    # il y en a quelques un dont je ne suis pas sûr !
-    dic_types = {1:(1,'x'),
-                 2:(1,'c'),
-                 3:(2,'h'),
-                 4:(4,'l'),
-                 5:(8,'ll'),
-                 6:(1,'b'),
-                 7:(1,'b'),
-                 8:(2,'h'),
-                 9:(4,'i'),
-                 10:(8,'ii'),
-                 11:(4,'f'),
-                 12:(8,'d'),}
+def year2utc(year):
+    """conversion de l'année en date utc utilisée par l'api rest d'ESRI"""
 
-    with open(fn,'rb') as f:
-        #le premier byte sert à savoir si on es en bigendian ou pas
-        r = f.read(2)
-        big = True
-        if r == b'II':
-            big = False
-        if big : big ='>'
-        else : big = '<'
-        #ensuite on a un nombre de verification ? -> normalement 42  sinon 43 pour les bigTiff
-        #le second c'est le début du premier IFD (image file directory) en bytes -> 8 en général (commence à 0)
-        s = struct.Struct(f"{big}Hl")
-        rec = f.read(6)
-        #print(s.unpack(rec))
+    # convert to datetime instance
+    date_time = datetime.strptime(str(year), '%Y')
+    # get UTC timestamp
+    utc_timestamp = date_time.replace(tzinfo=timezone.utc).timestamp()
+    # timestamp in milliseconds
+    return utc_timestamp*1000
 
-        #début de l'IFD' normalement commence à 8
-        #nombre de tags
-        s = struct.Struct(f"{big}H")
-        rec = f.read(2)
-        nb_tag, = s.unpack(rec)
-        dic_tags = {}
-        for i in range(nb_tag):
-            s = struct.Struct(f"{big}HHlHH")
-            rec = f.read(12)
-            no,typ,nb,value,xx = s.unpack(rec)
-            #print(no,typ,nb,value,xx)
-            dic_tags[no] = (typ,nb,value,xx)
+def read_csv_SITG_orthophotos_historiques(fn ='SITG_orthophotos_historiques.csv' ):
+    """renvoie un liste de tuples (nom,an_utc, taille_px)
+       le nom est composé de main_name + année + taille_px
+       an_utc est l'année au format utc utilisé par l'api rest d'ESRI"""
+    res = []
+    with open(fn, encoding = 'utf-8') as csvfile:
+        spamreader = csv.reader(csvfile, delimiter=';')
+        for i,row in enumerate(spamreader):
+            #la première ligne contient l'entête de colonnes
+            if i>0 :
+                an,taille_px,remarque = row
+                an = int(an)
+                an_utc = year2utc(an)
+                taille_px = float(taille_px)
+                if taille_px%1:
+                    name = f'{an} ({round(taille_px,1)}cm)'
+                else:
+                    name = f'{an} ({round(taille_px)}cm)'
+                res.append((name,an,an_utc, taille_px))
+    return res
 
-        #4 bytes pour si on a plusieurs IFD
-        s = struct.Struct(f"{big}l")
-        rec = f.read(4)
+def tex_folder(doc, subfolder = None):
+    """crée le dossier tex s'il n'existe pas et renvoie le chemin
+       si subfolder est renseigné crée également le sous-dossier
+       et renvoie le chemin du sous dossier
+       Si le doc n'est pas enregistré renvoie None
+       """
 
-        #VALEUR DES PIXELS
-        t = dic_tags.get(33550,None)
-        val_px = []
-        if t:
-            typ,nb,offset,xx = t
-            f.seek(offset)
-            nb_bytes,code = dic_types.get(typ,None)
-            for i in range(nb):
-                s = struct.Struct(f"{big}{code}")
-                rec = f.read(nb_bytes)
-                [val] = s.unpack(rec)
-                val_px.append(val)
+    path_doc = doc.GetDocumentPath()
+    #si le doc n'est pas enregistré renvoie None
+    if not path_doc : return None
 
-        val_px_x,val_px_y,v_z = val_px
+    path = os.path.join(path_doc,'tex')
 
-        #MATRICE DE CALAGE (coin en bas à gauche)
-        t = dic_tags.get(33922,None)
-        mat_calage = []
-        if t:
-            typ,nb,offset,xx = t
-            f.seek(offset)
-            nb_bytes,code = dic_types.get(typ,None)
-            for i in range(nb):
-                s = struct.Struct(f"{big}{code}")
-                rec = f.read(nb_bytes)
-                [val] = s.unpack(rec)
-                mat_calage.append(val)
-        coord_x = mat_calage[3]
-        coord_y = mat_calage[4]
+    if subfolder:
+        path = os.path.join(path,subfolder)
 
-        #PROJECTION (pas utilisée pour l'instant dans la fonction)
-        t = dic_tags.get(34737,None)
-        if t:
-            typ,nb,offset,xx = t
-            f.seek(offset)
-            nb_bytes,code = dic_types.get(typ,None)
-            geoAscii = ''
-            for i in range(nb):
-                s = struct.Struct(f"{big}{code}")
-                rec = f.read(nb_bytes)
-                [car] = s.unpack(rec)
-                geoAscii+=car.decode('utf-8')
+    if not os.path.isdir(path):
+        os.makedirs(path)
+    return path
 
-        return val_px_x,val_px_y,coord_x,coord_y
+def creer_plan(nom,mat,width,height, projection= 'top'):
+    plan = c4d.BaseObject(c4d.Oplane)
+    plan.SetName(nom)
+    plan[c4d.PRIM_PLANE_WIDTH]=width
+    plan[c4d.PRIM_PLANE_HEIGHT]=height
+    plan[c4d.PRIM_PLANE_SUBW]=1
+    plan[c4d.PRIM_PLANE_SUBH]=1
 
-#TODO VERIFIER COORDONNEES à mon avis il faudrait enlever la largeur d'un pixel....'
+    if projection == 'top':
+        plan[c4d.PRIM_AXIS]=c4d.PRIM_AXIS_YP
+    elif projection == 'front':
+        plan[c4d.PRIM_AXIS]=c4d.PRIM_AXIS_ZN
+    tag = c4d.TextureTag()
+    tag.SetMaterial(mat)
+    tag[c4d.TEXTURETAG_PROJECTION]=c4d.TEXTURETAG_PROJECTION_UVW
+    plan.InsertTag(tag)
 
-def importGeoTif(fn_tif,doc):
-    val_px_x,val_px_y,coord_x,coord_y = getCalageFromGeoTif(fn_tif)
-    #print(val_px_x,val_px_y,coord_x,coord_y)
+    return plan
 
-    origine = doc[CONTAINER_ORIGIN]
-    if not origine:
-        doc[CONTAINER_ORIGIN] = c4d.Vector(val_px_x,0,val_px_y)
-        origine = doc[CONTAINER_ORIGIN]
+def make_editable(op,doc):
+    pred = op.GetPred()
+    doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ,op)
+    res = c4d.utils.SendModelingCommand(command=c4d.MCOMMAND_MAKEEDITABLE,
+                            list=[op],
+                            mode=c4d.MODELINGCOMMANDMODE_ALL,
+                            bc=c4d.BaseContainer(),
+                            doc=doc)
 
-    bmp = c4d.bitmaps.BaseBitmap()
-    bmp.InitWith(fn_tif)
+    if res:
+        res = res[0]
+        if res:
+            doc.InsertObject(res, pred = pred)
+            doc.AddUndo(c4d.UNDOTYPE_NEWOBJ,res)
+            doc.SetActiveObject(res)
+            return res
 
-    width, height = bmp.GetSize()
-    #print(bmp.GetSize())
-    bits = bmp.GetBt()
-    inc = bmp.GetBt() // 8
-    bytesArray = bytearray(inc)
-    memoryView = memoryview(bytesArray)
-    nb_pts = width*height
-    nb_polys = (width-1)*(height-1)
-    poly = c4d.PolygonObject(nb_pts,nb_polys)
-    poly.SetName(os.path.basename(fn_tif))
-    pts = []
-    polys =[]
-    pos = c4d.Vector(val_px_x/2,0,val_px_y/2)
-    #print(pos)
-    i = 0
-    id_poly =0
+    return None
 
-    for line in range(height):
-        for row in range(width):
-            bmp.GetPixelCnt(row, line, 1, memoryView, inc, c4d.COLORMODE_GRAYf, c4d.PIXELCNT_0)
-            [y] = struct.unpack('f', bytes(memoryView[0:4]))
-            pos.y = y
-            pts.append(c4d.Vector(pos))
-            pos.x+=val_px_x
+def creer_mat(fn, doc, alpha = False):
+    nom = os.path.basename(fn)
+    relatif = False
+    docpath = doc.GetDocumentPath()
+    if docpath:
+        relatif = c4d.IsInSearchPath(nom, docpath)
+        #print(nom,relatif)
+    mat = c4d.BaseMaterial(c4d.Mmaterial)
+    mat.SetName(nom)
+    shd = c4d.BaseList2D(c4d.Xbitmap)
 
-            if line >0 and row>0:
-                c=i
-                b=i-width
-                a=b-1
-                d = i-1
+    if relatif:
+        shd[c4d.BITMAPSHADER_FILENAME] = nom
+    else:
+        shd[c4d.BITMAPSHADER_FILENAME] = fn
 
-                poly.SetPolygon(id_poly,c4d.CPolygon(a,b,c,d))
-                id_poly+=1
+    mat[c4d.MATERIAL_COLOR_SHADER] = shd
+    mat[c4d.MATERIAL_USE_REFLECTION] = False
+    mat[c4d.MATERIAL_COLOR_MODEL] = c4d.MATERIAL_COLOR_MODEL_ORENNAYAR
+    mat.InsertShader(shd)
+    mat[c4d.MATERIAL_USE_SPECULAR]=False
 
-            i+=1
+    #on teste si il y a une couche alpha
+    #le jpg ne peut pas contenir d'alpha'
+    if fn[:-4] != '.jpg':
+        bmp = c4d.bitmaps.BaseBitmap()
 
-        pos.x = val_px_x/2
-        pos.z-= val_px_y
+        result, isMovie = bmp.InitWith(fn)
+        if result == c4d.IMAGERESULT_OK: #int check
 
-    poly.SetAllPoints(pts)
-    poly.Message(c4d.MSG_UPDATE)
+            if bmp.GetInternalChannel(): alpha = True
+        bmp.FlushAll()
 
-    doc.InsertObject(poly)
-    pos = c4d.Vector(coord_x,0,coord_y)-origine
-    poly.SetAbsPos(pos)
+    if alpha :
+        mat[c4d.MATERIAL_USE_ALPHA]=True
+        shda = c4d.BaseList2D(c4d.Xbitmap)
+        if relatif:
+            shda[c4d.BITMAPSHADER_FILENAME] = nom
+        else:
+            shda[c4d.BITMAPSHADER_FILENAME] = fn
+        mat[c4d.MATERIAL_ALPHA_SHADER]=shda
+        mat.InsertShader(shda)
+
+    mat.Message(c4d.MSG_UPDATE)
+    mat.Update(True, True)
+    return mat
 
 class Bbox(object):
     def __init__(self,mini,maxi):
@@ -244,11 +209,6 @@ class Bbox(object):
         """renvoie vrai si point c4d est à l'intérieur"""
         return  self.xInside(pt.x) and self.zInside(pt.z)
 
-    def getRandomPointInside(self, y = 0):
-        x = self.min.x + random.random()*self.largeur
-        z = self.min.z + random.random()*self.hauteur
-        return c4d.Vector(x,y,z)
-
     def GetSpline(self,origine = c4d.Vector(0)):
         """renvoie une spline c4d de la bbox"""
         res = c4d.SplineObject(4,c4d.SPLINETYPE_LINEAR)
@@ -263,11 +223,6 @@ class Bbox(object):
         return ('X : '+str(self.min.x)+'-'+str(self.max.x)+'->'+str(self.max.x-self.min.x)+'\n'+
                 'Y : '+str(self.min.z)+'-'+str(self.max.z)+'->'+str(self.max.z-self.min.z))
 
-    def GetCube(self,haut = 200):
-    	res = c4d.BaseObject(c4d.Ocube)
-    	taille = c4d.Vector(self.largeur,haut,self.hauteur)
-    	res.SetAbsPos(self.centre)
-    	return res
 
     @staticmethod
     def fromObj(obj,origine = c4d.Vector()):
@@ -302,8 +257,6 @@ class Bbox(object):
         maxi = basedraw.SW(c4d.Vector(largeur,0,0)) + origine
         return Bbox(mini,maxi)
 
-
-
 def coordFromClipboard():
 
     clipboard =  c4d.GetStringFromClipboard()
@@ -323,18 +276,25 @@ def coordFromClipboard():
 #####################################################################################
 
 class EsriWorldTerrainDlg (c4d.gui.GeDialog):
+    URL = 'https://ge.ch/sitgags2/rest/services/RASTER/ORTHOPHOTOS_COLLECTION/ImageServer/'
 
-    ID_IMAGE_EXTRACTOR = 1059238
+    ID_ORTHO_DISPLAY = 1059233
+    ID_TOPOMAP_DISPLAY = 1059234
+    ID_STREETMAP_DISPLAY = 1059235
 
-    NB_POLY_MAX = 5000 #nombre de poly max en largeur ou hauteur
-    NB_POLY_MAX_SUM = 8000000 #apparemment il y a un nombre total à ne pas dépasser !
+    ID_TERRAIN_EXTRACTOR = 1059237
+
+
+    NB_POLY_MAX = 15000  #nombre de poly max en largeur ou hauteur
+    #NB_POLY_MAX_SUM = 8000000 #apparemment il y a un nombre total à ne pas dépasser !
 
     ID_GRP_MAIN = 1000
     ID_TXT_TITRE = 1001
     ID_TXT_REMARQUE = 1002
-
+    ID_GRP_RASTER_CHOICE = 1009
     ID_GRP_ETENDUE = 1010
     ID_GRPE_COORD = 1030
+    ID_BTON_DISPLAY = 1031
     ID_XMIN = 1011
     ID_XMAX = 1012
     ID_YMIN = 1013
@@ -344,12 +304,15 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
     ID_TXT_YMIN = 1017
     ID_TXT_YMAX = 1018
 
+
+
     ID_GRP_ETENDUE_BTONS = 1020
     ID_BTON_EMPRISE_VUE_HAUT = 1021
     ID_BTON_EMPRISE_OBJET = 1022
     ID_BTON_COPIER_COORDONNEES = 1023
     ID_BTON_COLLER_COORDONNEES = 1024
 
+    ID_LST_CHOIX_IMG = 1030
 
     ID_GRP_TAILLE = 1050
     ID_TXT_TAILLE_MAILLE = 1051
@@ -363,32 +326,38 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
     ID_NB_POLYS_HAUT = 1058
 
     ID_GRP_BUTTONS = 1070
-    ID_BTON_TEST_JETON = 1071
+
+    #ID_BTON_TEST_JETON = 1071
     ID_BTON_REQUEST = 1072
-    ID_BTON_IMPORT_GEOTIF = 1073
-    ID_BTON_ESRI_IMAGE = 1074
+    ID_BTON_IMPORT_ALL = 1073
 
 
 
-    TXT_TITRE = "Extraction ESRI WorldElevation"
-    TXT_REMARQUE = "Pour que l'extraction soit possible vous devez disposer d'un compte ESRI"
+    TXT_TITRE = "Extraction SITG Images"
+    #TXT_REMARQUE = "Pour que l'extraction soit possible vous devez disposer d'un compte SITG"
+    TXT_TITRE_GRP_CHOIX_IMAGE = "Choix de l'image"
+    TXT_DISPLAY = "Afficher dans la vue de haut"
     TXT_TITRE_GRP_ETENDUE = "Etendue de l'extraction"
     TXT_BTON_EMPRISE_VUE_HAUT = "emprise selon vue de haut"
     TXT_EMPRISE_OBJET = "emprise selon objet sélectionné"
     TXT_COPIER_COORDONNEES = "copier les valeurs dans le presse papier"
     TXT_COLLER_COORDONNEES = "coller les valeurs du presse papier"
 
-    TXT_TITTRE_GRP_TAILLE = f"Taille/définition de l'extraction (max. {NB_POLY_MAX} points larg/haut ou max {round(NB_POLY_MAX_SUM/1000000,1)} Mio de points en tout)"
+    TXT_TITTRE_GRP_TAILLE = f"Taille de l'extraction (max. {NB_POLY_MAX} points de larg et/ou haut"
 
     TXT_TAILLE_MAILLE = "taille de la maille"
-    TXT_NB_POLYS_LARG = "     points en largeur"
-    TXT_NB_POLYS_HAUT = "     points en hauteur"
-    TXT_NB_POLYS = "total de points (en Mio)"
+    TXT_NB_POLYS_LARG = "     pixels en largeur"
+    TXT_NB_POLYS_HAUT = "     pixels en hauteur"
+    TXT_NB_POLYS = "total de pixels (en Mega)"
 
-    TXT_BTON_TEST_JETON = "tester la validité du jeton"
-    TXT_BTON_REQUEST = "lancer la requête"
-    TXT_BTON_IMPORT_GEOTIF = "importer le geotif"
-    TXT_BTON_ESRI_IMAGE = "ESRI Extracteur d'images"
+    #TXT_BTON_TEST_JETON = "tester la validité du jeton"
+    TXT_BTON_REQUEST = "importer l'image"
+    TXT_BTON_IMPORT_ALL = "Importer toutes les années"
+
+    TXT_FILE_EXIST = "Il semble que le fichier mage existe déjà, voulez vous continuer ?"
+    TXT_DOWNLOAD_PROBLEM = "Problème lors du téléchargement de l'image"
+    TXT_FILE_CREATION_PROBLEM = "Problème lors de la création du fichier image"
+    
 
     MSG_NO_OBJECT = "Il n' y a pas d'objet sélectionné !"
     MSG_NO_CLIPBOARD = "Le presse-papier doit contenir 4 valeurs numériques séparées par des virgules dans cet ordre xmin,xmax,ymin,ymax"
@@ -404,6 +373,17 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         self.gadgets_taille = []
         self.emprise_OK = False
 
+        #liste des années disponibles selon fichier csv
+        fn_csv = os.path.join(os.path.dirname(__file__),NOM_CSV)
+        lst = read_csv_SITG_orthophotos_historiques(fn_csv)
+        self.LIST_WEB_SERVICES = []
+        for nom,an,an_utc, taille_px in lst:
+            dic = {}
+            dic['name'] = nom
+            dic['url_base'] = self.URL
+            dic['date'] = an_utc
+            dic['year'] = an
+            self.LIST_WEB_SERVICES.append(dic)
         return
 
     def verif_coordonnees(self):
@@ -447,15 +427,6 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
 
         self.nb_pts_w = int(self.width/self.taille_maille)+1
         self.nb_pts_h = int(self.height/self.taille_maille)+1
-
-        #si on dépasse le nombre de pixels total autorisé -> on corrige
-        if (self.nb_pts_w * self.nb_pts_h) > self.NB_POLY_MAX_SUM:
-            self.nb_polys = self.NB_POLY_MAX_SUM
-            rapport = self.width/self.height
-            pts_larg = (self.nb_polys*rapport)**0.5
-            self.taille_maille = self.width/(pts_larg-1)
-            self.nb_pts_w = int(self.width/self.taille_maille)+1
-            self.nb_pts_h = int(self.height/self.taille_maille)+1
 
 
         self.SetFloat(self.ID_TAILLE_MAILLE, self.taille_maille,format = c4d.FORMAT_METER)
@@ -513,25 +484,74 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         bbox = coordFromClipboard()
         if bbox:
             self.majCoord(bbox)
-
         else:
             c4d.gui.MessageDialog(self.MSG_NO_CLIPBOARD)
 
     def test_jeton(self):
         webbrowser.open('https://elevation.arcgis.com/arcgis/rest/services/WorldElevation/Terrain/ImageServer')
 
-    def requete_MNT(self):
+    def extract_IMG(self, service = None):
+
+        doc = c4d.documents.GetActiveDocument()
         sr = '2056'
-        xmin,ymin,xmyx,ymax = self.getBbox()
+        format = 'png'
+        #test
+        xmin,ymin,xmax,ymax = self.getBbox()
         width,height  = self.getDefinition()
+        choix_list = self.GetInt32(self.ID_LST_CHOIX_IMG)
+        if not service:
+            service = self.LIST_WEB_SERVICES[choix_list-1]
+        url_base = self.URL
+        #on prend le nom du service en minuscule et on remplace l'espaces par underscore
+        name =service['name'].upper().replace(' ','_')
+        name_img = f"SITG_ortho_{service['year']}_{round(xmin)}_{round(ymin)}_{round(xmax)}_{round(ymax)}.{format}"
 
-        if MNS:
-            url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_SURFACE_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true&time={ANNEE}"""
-        else:
-            url = f"""https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer/exportImage?f=image&bbox={xmin},{ymin},{xmyx},{ymax}&format=tiff&bboxSR={sr}&imageSR={sr}&size={width},{height}&pixelType=F32&adjustAspectRatio=true&time={ANNEE}"""
+        pth_dir = tex_folder(doc, subfolder = 'SITG_images')
+        fn_img = os.path.join(pth_dir,name_img)
+
+        if os.path.isfile(fn_img):
+            if not c4d.gui.QuestionDialog(self.TXT_FILE_EXIST):
+                return None
+
+        url = f"{url_base}exportImage?bbox={xmin},{ymin},{xmax},{ymax}&time={service['date']}&format={format}&size={width},{height}&f=image&bboxSR={sr}&imageSR={sr}"
+
+        try :
+            x = urllib.request.urlopen(url)
+
+        except :
+            c4d.gui.MessageDialog(self.TXT_DOWNLOAD_PROBLEM)
+            return None
+
+        try:
+            with open(fn_img,'wb') as saveFile:
+                saveFile.write(x.read())
+        except :
+            c4d.gui.MessageDialog(self.TXT_FILE_CREATION_PROBLEM)
+            return None
+
+        if not os.path.isfile(fn_img):
+            return None
+
+        doc.StartUndo()
+
+        #création du matériau
+        mat = creer_mat(fn_img, doc, alpha = False)
+        doc.InsertMaterial(mat)
+        doc.AddUndo(c4d.UNDOTYPE_NEWOBJ,mat)
+
+        plan = creer_plan(name_img,mat,(xmax-xmin),(ymax-ymin), projection= 'top')
+        centre = c4d.Vector((xmax+xmin)/2,0,(ymax+ymin)/2) - doc[CONTAINER_ORIGIN]
+        plan.SetAbsPos(centre)
+        doc.InsertObject(plan)
+        doc.AddUndo(c4d.UNDOTYPE_NEWOBJ,plan)
+
+        plan_edit = make_editable(plan,doc)
+
+        doc.EndUndo()
+        c4d.EventAdd()
 
 
-        return url
+        return True
 
 
         print(url)
@@ -547,6 +567,18 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
 
 
     def Command(self, id, msg):
+        #AFFICHAGE IMAGE VUE DE HAUT
+        if id == self.ID_BTON_DISPLAY:
+            choix_list = self.GetInt32(self.ID_LST_CHOIX_IMG)
+            #print(self.LIST_WEB_SERVICES(choix_list-1)['url_base'])
+            service = self.LIST_WEB_SERVICES[choix_list-1]['name']
+            if service == 'Orthophoto':
+                c4d.CallCommand(self.ID_ORTHO_DISPLAY)
+            elif service == 'Carte topo':
+                c4d.CallCommand(self.ID_TOPOMAP_DISPLAY)
+            elif service == 'Carte rues':
+                c4d.CallCommand(self.ID_STREETMAP_DISPLAY)
+
 
         # MODIFICATIONS COORDONNEES
         if id == self.ID_XMIN:
@@ -605,30 +637,19 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
             self.taille_maille = self.width/(pts_larg-1)
             self.maj_taille()
 
-
-
-
-
-
         # BOUTONS GENERAUX
-        if id == self.ID_BTON_TEST_JETON:
-            self.test_jeton()
+        #if id == self.ID_BTON_TEST_JETON:
+            #self.test_jeton()
+
+        #DOWNLOAD IMAGE AND MATERIAL CREATION
 
         if id == self.ID_BTON_REQUEST:
-            #elf.requete_MNT()
-            webbrowser.open(self.requete_MNT())
+            #extraction de l'image
+            fn_img = self.extract_IMG()
 
-        #IMPORTER LE GEOTIF
-        if id == self.ID_BTON_IMPORT_GEOTIF:
-            fn_tif = c4d.storage.LoadDialog()
-            if not fn_tif : return
-            doc = c4d.documents.GetActiveDocument()
-            importGeoTif(fn_tif,doc)
-            c4d.EventAdd()
-
-        # ESRI IMAGE EXTRACTOR
-        if id == self.ID_BTON_ESRI_IMAGE:
-            c4d.CallCommand(self.ID_IMAGE_EXTRACTOR)
+        if id == self.ID_BTON_IMPORT_ALL:
+            for service in self.LIST_WEB_SERVICES:
+                self.extract_IMG( service = service)
 
 
         return True
@@ -643,6 +664,10 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
 
         #self.SetInt32(self.ID_NB_POLYS_LARG, 0.0)
 
+        #LISTE CHOIX SUR ORTHOPHOTO
+        self.SetInt32(self.ID_LST_CHOIX_IMG,1)
+
+
         #DESACTIVATION DES CHAMPS TAILLE
         self.disableTailleGadgets()
 
@@ -654,8 +679,18 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         self.GroupBegin(self.ID_GRP_MAIN,flags=c4d.BFH_SCALEFIT, cols=1, rows=4)
         self.GroupBorderSpace(10, 10, 10, 0)
 
-        #self.AddStaticText(self.ID_TXT_REMARQUE,c4d.BFH_LEFT)
-        #self.SetString(self.ID_TXT_REMARQUE, self.TXT_REMARQUE)
+        # DEBUT GROUPE CHOIX IMAGE ET AFFICHAGE
+        self.GroupBegin(self.ID_GRP_RASTER_CHOICE,title = self.TXT_TITRE_GRP_CHOIX_IMAGE,flags=c4d.BFH_SCALEFIT, cols=1, rows=2)
+
+        self.GroupBorderSpace(10, 10, 10, 0)
+        self.GroupBorder(c4d.BORDER_GROUP_IN|c4d.BORDER_WITH_TITLE_BOLD)
+        #choix de l'image
+        self.AddComboBox(self.ID_LST_CHOIX_IMG, flags=c4d.BFH_SCALEFIT, initw=80, inith=0, specialalign=False, allowfiltering=False)
+        for i,service in enumerate(self.LIST_WEB_SERVICES):
+            self.AddChild(self.ID_LST_CHOIX_IMG, i+1, service['name'])
+
+        self.AddButton(self.ID_BTON_DISPLAY, flags=c4d.BFH_SCALEFIT, initw=0, inith=0, name=self.TXT_DISPLAY)
+        self.GroupEnd()
 
         # DEBUT GROUPE ETENDUE
         self.GroupBegin(self.ID_GRP_ETENDUE,title = self.TXT_TITRE_GRP_ETENDUE,flags=c4d.BFH_SCALEFIT, cols=1, rows=2)
@@ -733,16 +768,13 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         # FIN GROUPE TAILLE
 
         # DEBUT GROUPE BOUTONS
-        self.GroupBegin(self.ID_GRP_TAILLE,title = self.TXT_TITTRE_GRP_TAILLE,flags=c4d.BFH_SCALEFIT, cols=1, rows=4)
+        self.GroupBegin(self.ID_GRP_TAILLE,title = self.TXT_TITTRE_GRP_TAILLE,flags=c4d.BFH_SCALEFIT, cols=1, rows=1)
         self.GroupBorderSpace(10, 10, 10, 10)
 
-        self.AddButton(self.ID_BTON_TEST_JETON, flags=c4d.BFH_SCALEFIT, initw=0, inith=0, name=self.TXT_BTON_TEST_JETON)
         self.bton_request = self.AddButton(self.ID_BTON_REQUEST, flags=c4d.BFH_SCALEFIT, initw=0, inith=0, name=self.TXT_BTON_REQUEST)
         #self.Enable(self.bton_request,False)
 
-        self.AddButton(self.ID_BTON_IMPORT_GEOTIF, flags=c4d.BFH_SCALEFIT, initw=0, inith=0, name=self.TXT_BTON_IMPORT_GEOTIF)
-
-        self.AddButton(self.ID_BTON_ESRI_IMAGE, flags=c4d.BFH_SCALEFIT, initw=0, inith=0, name=self.TXT_BTON_ESRI_IMAGE)
+        self.AddButton(self.ID_BTON_IMPORT_ALL, flags=c4d.BFH_SCALEFIT, initw=0, inith=0, name=self.TXT_BTON_IMPORT_ALL)
 
         self.GroupEnd()
         # FIN GROUPE BOUTONS
@@ -750,8 +782,6 @@ class EsriWorldTerrainDlg (c4d.gui.GeDialog):
         self.GroupEnd() #FIN GROUP MAIN
 
         return True
-
-
 
 # Main function
 def main():
