@@ -7,7 +7,7 @@ import math
 
 
 #si on veut le mns mettre à true si on veut le MNT ->false
-MNS = False
+MNS = True
 
 #ANNEE de la DONNEEE -> voir dasn les données json
 # https://ge.ch/sitgags2/rest/services/RASTER/MNA_TERRAIN_COLLECTION/ImageServer?f=pjson

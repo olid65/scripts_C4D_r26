@@ -60,8 +60,8 @@ class Sandbox(object):
     FN_ASCII = '/Users/olivierdonze/switchdrive/Mandats/Nuit_de_la_science/Programmation_bac_a_sable/depthmap.asc'
     FN_TREES = '/Users/olivierdonze/switchdrive/Mandats/Nuit_de_la_science/Programmation_bac_a_sable/tags.json'
 
-    SCALE_ALT = 100
-    SCALE_TREES = 10
+    SCALE_ALT = 10
+    SCALE_TREES = 2
 
     NB_PX_GRADIENT = 100 #nombre de pixel dans les marges
     SMOOTH = True #True si on veut lisser les marges des bords
@@ -82,11 +82,13 @@ class Sandbox(object):
         #trees
         self.trees_objs = self.doc.SearchObject(NAME_OBJ_TREES)
         srce_parent = self.doc.SearchObject(NAME_SOURCE_TREES)
+
         #dico pour stocker les sources avec l'id en étiquette et la liste des objets (variantes) en clé
         self.trees_srce = {int(child.GetName()):child.GetChildren() for child in srce_parent.GetChildren()}
 
 
     def update(self):
+        self.doc = c4d.documents.GetActiveDocument()
         self.update_terrain()
         self.update_trees()
 
@@ -112,12 +114,13 @@ class Sandbox(object):
                 else:
                     factor = c4d.utils.Clamp( 0, 1,val)
 
-            pt.y =alt*factor
+            pt.y = alt_initial + alt*factor
 
         self.depthmap_obj.SetAllPoints(pts)
         self.depthmap_obj.Message(c4d.MSG_UPDATE)
 
     def update_trees(self):
+        random.seed(123)
         data = self.get_trees_from_json()
         #si l'objet n'existe pas on le crée
         if not self.trees_objs:
@@ -130,47 +133,56 @@ class Sandbox(object):
                 o.Remove()
 
         for tag in data['tags']:
-
             inst = c4d.BaseObject(c4d.Oinstance)
-
-            #look at camera tag insertion
-            tag_look = c4d.BaseTag(c4d.Tlookatcamera)
-            inst.InsertTag(tag_look)
-            priority = c4d.PriorityData()
-            priority.SetPriorityValue(c4d.PRIORITYVALUE_MODE,c4d.CYCLE_ANIMATION)
-            tag_look[c4d.EXPRESSION_PRIORITY] = priority
-
             inst[c4d.INSTANCEOBJECT_RENDERINSTANCE_MODE] = c4d.INSTANCEOBJECT_RENDERINSTANCE_MODE_SINGLEINSTANCE
 
-            inst[c4d.INSTANCEOBJECT_LINK] = random.choice(self.trees_srce[tag['tag_id']])
+            obj_srce = random.choice(self.trees_srce[tag['tag_id']])
+
+            inst[c4d.INSTANCEOBJECT_LINK] = obj_srce
 
             #pos = c4d.Vector(tag['position']['x']*FACT_ECHELLE,0,tag['position']['y']*FACT_ECHELLE)
 
-            #ATTENTION j'ai inversé le x et le y parce qu'il que sur les valeurs test
-            #il y a des valeurs en y de 440 qui est plus grand que 432 ! (à demander à Alexis)
-            #si les valeurs partent de zéro enlever les deux -1
-
-            id_pt = (tag['position']['x'])*NB_PX_X + tag['position']['y']
+            id_pt = (tag['position']['y'])*NB_PX_X + tag['position']['x']
             pos = c4d.Vector(self.depthmap_obj.GetPoint(id_pt)* self.depthmap_obj.GetMg())
 
             inst.SetAbsPos(pos)
             inst.SetAbsScale(c4d.Vector(self.SCALE_TREES))
 
-            #angle  = c4d.utils.DegToRad(tag['rotation'])
-            #inst.SetAbsRot(c4d.Vector(angle,0,0))
+            #Si l'objet à copier est un plan ou un objet polygonal avec 4 points on le tourne vers la caméra
+            #sinon on tourne selon les valeurs du tag (QRcode)
+            look_at_camera = False
 
-            #Je n'arrive pas à rafraichir la vue pour que le tag lookAtCamera fonctionne
-            #j'ai été obligé de bricoler ça
-            self.look_at_camera(inst)
+            if obj_srce.CheckType(c4d.Oplane):
+                look_at_camera = True
+            if obj_srce.CheckType(c4d.Opolygon) and obj_srce.GetPointCount() ==4:
+                look_at_camera = True
 
-            #nom avec
+            if look_at_camera :
+                #look at camera tag insertion
+                tag_look = c4d.BaseTag(c4d.Tlookatcamera)
+                inst.InsertTag(tag_look)
+                priority = c4d.PriorityData()
+                #priority.SetPriorityValue(c4d.PRIORITYVALUE_MODE,c4d.CYCLE_INITIAL)
+                priority.SetPriorityValue(c4d.PRIORITYVALUE_CAMERADEPENDENT,True)
+                tag_look[c4d.EXPRESSION_PRIORITY] = priority
+                #Je n'arrive pas à rafraichir la vue pour que le tag lookAtCamera fonctionne
+                #j'ai été obligé de bricoler ça
+                self.look_at_camera(inst)
+
+            else:
+                angle  = c4d.utils.DegToRad(tag['rotation'])
+                inst.SetAbsRot(c4d.Vector(angle,0,0))
+
+
+
+            #nom avec tag_id
             inst.SetName(tag['tag_id'])
             inst.InsertUnderLast(self.trees_objs)
             #inst.Message(c4d.MSG_UPDATE)
 
     def look_at_camera(self,obj):
-        bd = doc.GetRenderBaseDraw()
-        cp = bd.GetSceneCamera(doc)
+        bd = self.doc.GetRenderBaseDraw()
+        cp = bd.GetSceneCamera(self.doc)
         local = cp.GetMg().off * (~(obj.GetUpMg() * obj.GetFrozenMln())) - obj.GetRelPos()
 
         hpb = c4d.utils.VectorToHPB(local)
