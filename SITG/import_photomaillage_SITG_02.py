@@ -56,7 +56,7 @@ def main() -> None:
     res = c4d.BaseObject(c4d.Onull)
     res.SetName('photomaillage_SITG')
     doc.InsertObject(res)
-    
+
 
     first_mat = doc.GetFirstMaterial()
 
@@ -69,10 +69,12 @@ def main() -> None:
         c4d.documents.SaveDocument(doc, "", c4d.SAVEDOCUMENTFLAGS_DIALOGSALLOWED, c4d.FORMAT_C4DEXPORT)
         c4d.CallCommand(12098) # Enregistrer le projet
         path_doc = doc.GetDocumentPath()
-    
+
     pth = os.path.join(path_doc,'photomaillage_SITG')
     #on crée un sous-dossier dans tex
     dir_tex = os.path.join(path_doc,'tex')
+    if not os.path.isdir(dir_tex):
+        os.mkdir(dir_tex)
     dir_imgs = os.path.join(dir_tex,res.GetName())
     if not os.path.isdir(dir_imgs):
         os.mkdir(dir_imgs)
