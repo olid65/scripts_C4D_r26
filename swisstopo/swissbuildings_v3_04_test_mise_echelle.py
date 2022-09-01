@@ -7,8 +7,8 @@ op: Optional[c4d.BaseObject]  # The active object, None if unselected
 #ID pour stocker l'échelle du MNT si on veut pouvoir la changer après
 ID_BUILDING_SCALE = 1059451
 
-SCALE_MNT = 2.5
-SCALE_BUILDINGS = 1.25
+SCALE_MNT = 0
+SCALE_BUILDINGS = 1
 
 def main() -> None:
     # Called when the plugin is selected by the user. Similar to CommandData.Execute.
